@@ -67,6 +67,8 @@ export function responseTimingSummary(triggerPolicy: TriggerPolicy, settings: Re
     if (resolved.attentionWake) parts.push('接着说')
     if (resolved.debounceSeconds > 0) parts.push(`合并 ${resolved.debounceSeconds} 秒`)
   }
+  if (triggerPolicy === 'always' && resolved.replyLimitPercent < 100)
+    parts.push(`最多回 ${resolved.replyLimitPercent}%`)
   return parts
 }
 
@@ -124,6 +126,15 @@ export function ResponseTimingRows({
             {number('waitMaxTotalSeconds', '一共最多等（秒）')}
           </PropertyRow>
         </>
+      ) : null}
+      {triggerPolicy === 'always' ? (
+        <PropertyRow
+          label="最多回复"
+          description="低于 100% 时普通消息只叫醒它、可以不回，它的回复不超过最近消息的这个比例"
+          tip="按最近 50 条群友消息计算，一分钟内连着发的几条算一次回复。被 @、回复它的消息或命令时照常必须回复，不受比例限制。"
+        >
+          {number('replyLimitPercent', '最多回复（%）', '%')}
+        </PropertyRow>
       ) : null}
       {smart ? (
         <>

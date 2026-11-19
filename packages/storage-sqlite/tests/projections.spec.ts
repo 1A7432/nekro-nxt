@@ -158,6 +158,20 @@ describe('client workspace projections', () => {
     }
   })
 
+  it('lists when the agent spoke in a channel since a time, leaving out failed sends', async () => {
+    const { database, repository, channel, other, outbound } = await fixture()
+    try {
+      outbound(500, ['sent'])
+      outbound(1_900, ['sent'])
+      outbound(2_000, ['failed'])
+      outbound(2_100, ['unknown'])
+      expect([...repository.listAgentOutboundTimes(channel.id, 1_000)].sort()).toEqual([1_900, 2_100])
+      expect(repository.listAgentOutboundTimes(other.id, 0)).toEqual([])
+    } finally {
+      database.close()
+    }
+  })
+
   it('buckets member and outbound activity per channel inside the window', async () => {
     const { database, repository, channel, other, append, outbound } = await fixture()
     try {

@@ -9,6 +9,7 @@ export const RESPONSE_TIMING_LIMITS = {
   debounceMaxMessages: { min: 1, max: 20 },
   attentionSeconds: { min: 5, max: 600 },
   midWakesPerMinute: { min: 1, max: 30 },
+  replyLimitPercent: { min: 1, max: 100 },
 } as const
 
 const bounded = (key: keyof typeof RESPONSE_TIMING_LIMITS) =>
@@ -40,6 +41,11 @@ export const ResponseTimingSettingsSchema = z
     attentionSeconds: bounded('attentionSeconds'),
     /** Smart: name and attention wakes per channel per minute; strong signals are never limited. */
     midWakesPerMinute: bounded('midWakesPerMinute'),
+    /**
+     * Every message: below 100, plain member messages wake the agent without obliging a reply, and it is only woken
+     * while its replies stay within this share of recent member messages. Mentions, replies and commands still oblige.
+     */
+    replyLimitPercent: bounded('replyLimitPercent'),
   })
   .strict()
 
@@ -60,6 +66,7 @@ export const RESPONSE_TIMING_DEFAULTS: ResolvedResponseTiming = {
   attentionWake: true,
   attentionSeconds: 60,
   midWakesPerMinute: 3,
+  replyLimitPercent: 100,
 }
 
 /** Shortest quiet period a wait may ask for, whatever the channel allows. */

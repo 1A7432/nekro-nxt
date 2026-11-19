@@ -1,5 +1,5 @@
 import { createHistoryRepository } from './history.js'
-import { and, asc, eq, inArray, or } from 'drizzle-orm'
+import { and, asc, eq, gte, inArray, isNotNull, ne, or } from 'drizzle-orm'
 import type { AdapterDeliveryReceipt } from '@nekro-nxt/adapter-sdk'
 import { AdapterDeliveryReceiptSchema } from '@nekro-nxt/adapter-sdk'
 import {
@@ -10,6 +10,7 @@ import {
   type PhysicalDeliveryId,
 } from '@nekro-nxt/contracts'
 import {
+  isAdminConsoleOutbound,
   isConsoleAnchorHistory,
   type ChannelHistoryEntry,
   type ChannelHistoryRepository,
@@ -24,7 +25,7 @@ import type { DrizzleCoreDatabase } from '../database.js'
 import { channelEvents, episodes, outboundIntents, physicalDeliveries } from '../schema.js'
 import { ChannelEventRowSchema, OutboundIntentRowSchema, PhysicalDeliveryRowSchema } from '../row-schemas.js'
 
-type OutboxSlice = Required<Pick<RuntimeRepository, 'findOutboundByNoticeKey'>> &
+type OutboxSlice = Required<Pick<RuntimeRepository, 'findOutboundByNoticeKey' | 'listAgentOutboundTimes'>> &
   Pick<
     RuntimeRepository,
     | 'findOutboundByClientRequest'
@@ -278,6 +279,23 @@ export function createOutboxRepository(database: DrizzleCoreDatabase): OutboxSli
         .orderBy(asc(outboundIntents.createdAt), asc(outboundIntents.id))
         .all()
         .map(({ id }) => id)
+    },
+    listAgentOutboundTimes(channelId: ChannelId, since: number): readonly number[] {
+      return database
+        .select({ createdAt: outboundIntents.createdAt, sourceTurnId: outboundIntents.sourceTurnId })
+        .from(outboundIntents)
+        .leftJoin(episodes, eq(episodes.id, outboundIntents.episodeId))
+        .where(
+          and(
+            or(eq(episodes.channelId, channelId), eq(outboundIntents.channelId, channelId)),
+            isNotNull(outboundIntents.agentRevisionId),
+            ne(outboundIntents.state, 'failed'),
+            gte(outboundIntents.createdAt, since),
+          ),
+        )
+        .all()
+        .filter(({ sourceTurnId }) => !isAdminConsoleOutbound(sourceTurnId ?? undefined))
+        .map(({ createdAt }) => createdAt)
     },
     getChannelHistoryEntryByLogicalMessageId(channelId, logicalMessageId): ChannelHistoryEntry | undefined {
       const outboundCandidate = database

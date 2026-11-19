@@ -610,6 +610,20 @@ class MemoryRuntimeRepository implements RuntimeRepository {
       .filter(({ intent }) => intent.state === 'planned' || intent.state === 'sending')
       .map(({ intent }) => intent.id)
   }
+  listAgentOutboundTimes(channelId: ChannelId, since: number): readonly number[] {
+    return [...this.outbounds.values()]
+      .map(({ intent }) => intent)
+      .filter(
+        (intent) =>
+          intent.agentRevisionId !== undefined &&
+          intent.state !== 'failed' &&
+          intent.createdAt >= since &&
+          (intent.channelId ??
+            (intent.episodeId === undefined ? undefined : this.episodes.get(intent.episodeId)?.channelId)) ===
+            channelId,
+      )
+      .map((intent) => intent.createdAt)
+  }
 
   private requiredEpisode(id: EpisodeId): EpisodeRecord {
     const episode = this.episodes.get(id)
@@ -3793,6 +3807,30 @@ describe('ChannelRuntime response timing (Decision 2026-10-31)', () => {
     await h.timers.advance(61_000)
     await h.say(h.alice, '我去忙了')
     expect(h.admissionCalls).toHaveLength(2)
+  })
+
+  it('lets every message wake the agent without obliging a reply while its replies stay within the limit', async () => {
+    const h = await harness('always', { replyLimitPercent: 20 })
+    // One reply needs five member messages behind it.
+    for (const text of ['一', '二', '三', '四']) await h.say(h.bob, text)
+    expect(h.admissionCalls).toHaveLength(0)
+    await h.say(h.bob, '五')
+    expect(h.admissionCalls).toHaveLength(1)
+    expect(h.admissionCalls[0]).toMatchObject({ replyRequired: false })
+    expect(h.admissionCalls[0]!.wakeNote).toContain('20%')
+    await h.timers.advance(10_000)
+    h.adapter.queueReceipt({ status: 'sent', platformMessageId: 'limit-reply' })
+    await h.runtime.sendMessage({ episodeId: h.episodeId(), parts: [{ type: 'text', text: '在呢' }] })
+    // That reply holds the share of five messages; the next wake waits for ten.
+    for (const text of ['六', '七', '八', '九']) await h.say(h.bob, text)
+    expect(h.admissionCalls).toHaveLength(1)
+    await h.say(h.bob, '十')
+    expect(h.admissionCalls).toHaveLength(2)
+    expect(h.admissionCalls[1]).toMatchObject({ replyRequired: false })
+    // Addressing the agent still obliges a reply, whatever the share.
+    await h.say(h.alice, '@荧', { mention: true })
+    expect(h.admissionCalls).toHaveLength(3)
+    expect(h.admissionCalls[2]).toMatchObject({ replyRequired: true })
   })
 
   it('debounces a smart burst into one turn, flushing at the message cap', async () => {

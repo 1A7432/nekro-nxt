@@ -2087,7 +2087,12 @@ export class ChannelRuntime {
     )
     // Hidden facts still advance the Admission cursor with visible ones, but never form an Admission on their own.
     if (this.#visibleEvents(binding, candidateEvents).length === 0) return
-    const feedbackLeaseId = await this.#feedback.startProcessingFeedback(binding, episode, wake.feedbackEvent ?? event)
+    // The processing reaction promises a reply, so a wake the agent may leave unanswered shows none.
+    const obliged =
+      wake.replyRequired === true || this.#replyRequired(binding, this.#visibleEvents(binding, candidateEvents))
+    const feedbackLeaseId = obliged
+      ? await this.#feedback.startProcessingFeedback(binding, episode, wake.feedbackEvent ?? event)
+      : undefined
     if (!this.#admissionAllowed(binding.agentId)) {
       if (feedbackLeaseId !== undefined) await this.#feedback.cleanupEpisodeFeedback(episode.id, 'cancelled')
       return

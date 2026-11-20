@@ -3796,16 +3796,20 @@ describe('ChannelRuntime response timing (Decision 2026-10-31)', () => {
   })
 
   it('with optional replies, every plain message wakes the agent without obliging a reply', async () => {
-    const h = await harness('always', { optionalReplies: true })
+    const feedback = vi.fn(() => Promise.resolve({ status: 'succeeded' as const }))
+    const h = await harness('always', { optionalReplies: true }, { startProcessingFeedback: feedback })
     for (const text of ['一', '二', '三']) await h.say(h.bob, text)
     expect(h.admissionCalls).toHaveLength(3)
     for (const call of h.admissionCalls) expect(call).toMatchObject({ replyRequired: false })
     expect(h.admissionCalls[0]!.wakeNote).toContain('finish_channel_turn')
     expect(h.admissionCalls[0]!.wakeNote).not.toContain('%')
-    // Addressing the agent still obliges a reply.
+    // The processing reaction promises a reply, so optional wakes show none.
+    expect(feedback).not.toHaveBeenCalled()
+    // Addressing the agent still obliges a reply, and shows the reaction.
     await h.say(h.alice, '@荧', { mention: true })
     expect(h.admissionCalls).toHaveLength(4)
     expect(h.admissionCalls[3]).toMatchObject({ replyRequired: true })
+    expect(feedback).toHaveBeenCalledOnce()
   })
 
   it('debounces a smart burst into one turn, flushing at the message cap', async () => {

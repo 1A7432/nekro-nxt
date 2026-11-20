@@ -288,8 +288,6 @@ export interface RuntimeRepository {
   completeOutboundIntent(id: OutboundIntentId, state: OutboundState): void
   getOutbound(id: OutboundIntentId): OutboundSnapshot
   listUnsettledOutboundIds(): readonly OutboundIntentId[]
-  /** When the agent's messages to a channel were planned since `since`, leaving out console and failed sends. */
-  listAgentOutboundTimes?(channelId: ChannelId, since: number): readonly number[]
 }
 
 export interface AgentSessionDriver {
@@ -573,8 +571,8 @@ const isTriggered = (
   const command = typeof event.facts?.['command'] === 'string' && event.facts['command'].length > 0
   switch (binding.triggerPolicy) {
     case 'always':
-      // With a reply limit, plain messages only wake the agent (see `#midSignal`); what addresses it still obliges.
-      return resolveResponseTiming(binding.responseTiming).replyLimitPercent >= 100 || addressed || command
+      // With optional replies, plain messages only wake the agent (see `#midSignal`); what addresses it still obliges.
+      return !resolveResponseTiming(binding.responseTiming).optionalReplies || addressed || command
     case 'observe-only':
       return false
     case 'mentioned-or-replied':
@@ -613,9 +611,7 @@ const waitSupported = (binding: BindingRecord): boolean =>
   binding.triggerPolicy !== 'command' && binding.triggerPolicy !== 'observe-only'
 
 type MidSignal =
-  | { readonly kind: 'attention' }
-  | { readonly kind: 'name'; readonly name: string }
-  | { readonly kind: 'ambient'; readonly percent: number }
+  { readonly kind: 'attention' } | { readonly kind: 'name'; readonly name: string } | { readonly kind: 'ambient' }
 
 const midWakeNote = (signal: MidSignal): string => {
   switch (signal.kind) {
@@ -624,18 +620,9 @@ const midWakeNote = (signal: MidSignal): string => {
     case 'attention':
       return '刚才跟你聊天的人接着说了话，所以叫醒了你。这不一定是对你说的；不想接话就用 finish_channel_turn 结束，不回也可以。'
     case 'ambient':
-      return `群里有新消息。不用每条都接：什么时候说、说什么由你决定，不想接就用 finish_channel_turn 结束。你在这里的发言大约只占最近消息的 ${signal.percent}%，宁少勿多。`
+      return '群里有新消息，所有消息你都能看到。接不接话由你决定：有人在跟你说话、话题和你有关，或者你有想说的，就像群友一样自然地接一句；只是别人之间在聊、你插不上话，就用 finish_channel_turn 结束，不回也可以。'
   }
 }
-
-/** Member messages a reply limit is measured against, and the pause that separates two replies of the agent. */
-const REPLY_LIMIT_WINDOW = 50
-const REPLY_GAP_MS = 60_000
-
-/** Messages the agent sends close together, such as a chat split into short lines, count as one reply. */
-const countReplies = (times: readonly number[]): number =>
-  [...times].sort((a, b) => a - b).filter((at, index, sorted) => index === 0 || at - sorted[index - 1]! > REPLY_GAP_MS)
-    .length
 
 interface AdmissionWake {
   /** A finished wait obliges a reply even though its fact is no trigger. */
@@ -927,7 +914,7 @@ export class ChannelRuntime {
 
   /**
    * Optional wakes: in smart mode the agent's name or an alias, or someone who was just talking with it; with every
-   * message under a reply limit, any plain member message while the agent's replies stay within the limit.
+   * message and optional replies, any plain member message.
    */
   #midSignal(
     binding: BindingRecord,
@@ -935,16 +922,13 @@ export class ChannelRuntime {
     lane: string,
     timing: ResolvedResponseTiming,
   ): MidSignal | undefined {
-    const ambient = binding.triggerPolicy === 'always' && timing.replyLimitPercent < 100
+    const ambient = binding.triggerPolicy === 'always' && timing.optionalReplies
     if ((binding.triggerPolicy !== 'smart' && !ambient) || binding.paused) return undefined
     if (event.kind !== 'message-created' || event.activityKey !== undefined || event.senderMemberId === undefined)
       return undefined
     if (this.#commands?.excludes(event) || this.#hookDecision(binding, event)?.trigger === 'suppress') return undefined
     if (this.#core.describeChannelMember(event.channelId, event.senderMemberId)?.kind !== 'member') return undefined
-    if (ambient) {
-      const percent = timing.replyLimitPercent
-      return this.#withinReplyLimit(binding.channelId, percent) ? { kind: 'ambient', percent } : undefined
-    }
+    if (ambient) return { kind: 'ambient' }
     if (!this.#timing.midWakeAvailable(lane, timing.midWakesPerMinute)) return undefined
     if (timing.attentionWake && this.#timing.inAttention(lane, event.senderMemberId, timing.attentionSeconds * 1000)) {
       return { kind: 'attention' }
@@ -960,22 +944,6 @@ export class ChannelRuntime {
       if (name !== undefined) return { kind: 'name', name }
     }
     return undefined
-  }
-
-  /** Whether one more reply keeps the agent within `percent` of the latest member messages in the channel. */
-  #withinReplyLimit(channelId: ChannelId, percent: number): boolean {
-    const messages = this.#coreRepository
-      .listChannelEvents(channelId, { limit: REPLY_LIMIT_WINDOW })
-      .filter(
-        (event) =>
-          event.kind === 'message-created' &&
-          event.senderMemberId !== undefined &&
-          this.#core.describeChannelMember(channelId, event.senderMemberId)?.kind === 'member',
-      )
-    if (messages.length === 0) return false
-    const since = Math.min(...messages.map((event) => event.receivedAt))
-    const replies = countReplies(this.#runtimeRepository.listAgentOutboundTimes?.(channelId, since) ?? [])
-    return (replies + 1) * 100 <= percent * messages.length
   }
 
   #sessionRunning(binding: BindingRecord): boolean {

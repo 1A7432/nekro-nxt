@@ -67,8 +67,7 @@ export function responseTimingSummary(triggerPolicy: TriggerPolicy, settings: Re
     if (resolved.attentionWake) parts.push('接着说')
     if (resolved.debounceSeconds > 0) parts.push(`合并 ${resolved.debounceSeconds} 秒`)
   }
-  if (triggerPolicy === 'always' && resolved.replyLimitPercent < 100)
-    parts.push(`最多回 ${resolved.replyLimitPercent}%`)
+  if (triggerPolicy === 'always' && resolved.optionalReplies) parts.push('可以不回')
   return parts
 }
 
@@ -129,11 +128,15 @@ export function ResponseTimingRows({
       ) : null}
       {triggerPolicy === 'always' ? (
         <PropertyRow
-          label="最多回复"
-          description="低于 100% 时普通消息只叫醒它、可以不回，它的回复不超过最近消息的这个比例"
-          tip="按最近 50 条群友消息计算，一分钟内连着发的几条算一次回复。被 @、回复它的消息或命令时照常必须回复，不受比例限制。"
+          label="普通消息可以不回"
+          description="每条消息仍然都会叫醒它，由它自己决定接不接话"
+          tip="被 @、回复它的消息或命令时照常必须回复。每条消息都会让它想一次，模型用量会比只在被叫到时回复高。"
         >
-          {number('replyLimitPercent', '最多回复（%）', '%')}
+          <Switch
+            label="普通消息可以不回"
+            checked={resolved.optionalReplies}
+            onCheckedChange={(on) => set('optionalReplies', on)}
+          />
         </PropertyRow>
       ) : null}
       {smart ? (

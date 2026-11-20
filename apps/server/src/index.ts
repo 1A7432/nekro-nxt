@@ -1,3 +1,4 @@
+import { FIRECRAWL_SEARCH_PROVIDER_ID, registerFirecrawlSearch } from './web-search-firecrawl.js'
 import { checkDynamicHostSource } from './dynamic-source-check.js'
 import SqliteSessionQueryEngine from '@deepseek-ai/dsh-session-query-sqlite'
 import {
@@ -3999,9 +4000,14 @@ export class DshHostRuntime implements AgentSessionDriver {
         config: { maxInlineTokens: 12_500 },
         required: true,
       })
-      // Search and fetch go straight to the DeepSeek Search and Fetch APIs, one request per operation, billed to the
-      // DEEPSEEK_API_KEY credential (NXT has no DeepSeek account sign-in).
-      await context.plugin(WebRuntime, { searchProvider: 'deepseek-search-api', fetchProvider: 'deepseek-fetch-api' })
+      // Search goes to Firecrawl and falls back to the DeepSeek Search API whenever Firecrawl fails or has no key;
+      // fetch goes straight to the DeepSeek Fetch API. DeepSeek requests are billed to the DEEPSEEK_API_KEY
+      // credential (NXT has no DeepSeek account sign-in).
+      await context.plugin(WebRuntime, {
+        searchProvider: FIRECRAWL_SEARCH_PROVIDER_ID,
+        fetchProvider: 'deepseek-fetch-api',
+      })
+      registerFirecrawlSearch(context, context.credentials, { warn: (message) => console.warn(message) })
       registerDshHostProfileEntry(context, {
         id: 'web-deepseek-api',
         name: '@deepseek-ai/dsh-web-deepseek-api',

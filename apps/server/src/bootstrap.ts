@@ -106,6 +106,7 @@ import { AuthoringTestConfig } from './authoring-test-config.js'
 import { createExtensionEgress } from './extension-egress.js'
 import { ExtensionInboundHookGate } from './extension-inbound-hooks.js'
 import { voiceTranscriptionAnnotator } from './voice-transcription.js'
+import { administratorAnnotator } from './administrator-annotation.js'
 import { ExtensionJobScheduler, scheduledJob, sqliteNxtJobs, syncDeclaredJobs } from './extension-jobs.js'
 import { ScheduledTasks, type JobFireOutcome } from './scheduled-tasks.js'
 import { CodeRunNode } from './code-run-node.js'
@@ -1507,6 +1508,16 @@ export class NekroRuntime {
       const inboundHooks = new ExtensionInboundHookGate({
         handlers: (agentId) => host.inboundHandlers(agentId),
         hostAnnotators: [
+          administratorAnnotator({
+            hasAdministrators: () => repository.listInstanceAdministrators().length > 0,
+            isAdministrator: (connectionId, platformUserId) =>
+              repository.isInstanceAdministrator(connectionId, platformUserId),
+            connectionOf: (memberId) => {
+              const channelId = repository.getChannelMember(memberId)?.channelId
+              return channelId === undefined ? undefined : repository.getChannel(channelId)?.connectionId
+            },
+            platformUserId: memberPlatformUserId,
+          }),
           voiceTranscriptionAnnotator({
             enabled: (agentId) => repository.getAgent(agentId)?.revision.capabilities.voiceTranscription === true,
             audio: (assetId) => {

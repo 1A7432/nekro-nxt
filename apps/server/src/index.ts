@@ -290,6 +290,7 @@ import { extensionReferenceTool } from './extension-reference-tool.js'
 import { sessionCapabilityPacks } from './session-capability-packs.js'
 import { communityBrowseTools } from './community-agent-tools.js'
 import { communityDocsMediaTool, communityDocsTools, type CommunityDocsPort } from './community-docs-tools.js'
+import { mountPlainWebCitations } from './web-citation.js'
 import { findInputDetail, normalizeSessionEvents } from './channel-runtime-events.js'
 import type { RuntimeProjectionEvent } from './channel-runtime-projection.js'
 import { parseDshImageAttachmentRef } from './dsh-interop/unsafe.js'
@@ -4652,6 +4653,8 @@ export class DshHostRuntime implements AgentSessionDriver {
           this.#communication.supportsMarkdown?.(input.channelId) === true,
         ),
       })
+      // DSH's web tools ask for Markdown links; where the channel shows none they would arrive as raw marks.
+      if (this.#communication.supportsMarkdown?.(input.channelId) !== true) mountPlainWebCitations(agentContext)
       // Decided when the session opens, like the rest of the prompt; a later change still gets a refusal at runtime.
       const requestWait = this.#communication.waitForMore
       const waitAvailable =

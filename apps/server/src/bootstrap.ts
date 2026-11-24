@@ -1399,6 +1399,7 @@ export class NekroRuntime {
             return settled.current.nudgeChannelMember(input)
           },
           supportsWaitForMore: (channelId) => settled.current?.waitForMoreAvailable(channelId) ?? true,
+          optionalReplies: (channelId) => settled.current?.optionalRepliesEnabled(channelId) ?? false,
           waitForMore: (input) => {
             if (!settled.current) return { accepted: false, reason: '服务还没准备好，直接回复或者结束这一轮。' }
             return settled.current.requestWaitForMore(input)

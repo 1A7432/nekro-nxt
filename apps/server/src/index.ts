@@ -522,6 +522,8 @@ export interface AgentCommunicationPort {
   supportsMarkdown?(channelId: ChannelId): boolean
   /** False when the channel's settings leave no room to wait; sessions opened then do not offer `waiting-for-more`. */
   supportsWaitForMore?(channelId: ChannelId): boolean
+  /** True when every plain message wakes the agent and replying is optional; said once in the system prompt. */
+  optionalReplies?(channelId: ChannelId): boolean
   retractMessage?(input: {
     readonly episodeId: EpisodeId
     readonly logicalMessageId: LogicalMessageId
@@ -1406,6 +1408,8 @@ const ROOT_CHANNEL_MESSAGE_POLICY_HEAD = `你在一个真实的聊天频道里�
 
 const ROOT_CHANNEL_WAIT_POLICY = `群友常把一句话拆成几条发。对方看起来话还没说完，比如只叫了你一声、一句话只说了一半，就用 finish_channel_turn 的 waiting-for-more 先等他说完，他停下来以后会再叫你。`
 
+const ROOT_CHANNEL_OPTIONAL_REPLY_POLICY = `群里每条消息你都能看到，不一定要回；不想接话就用 finish_channel_turn 结束。`
+
 const ROOT_CHANNEL_MESSAGE_POLICY_TAIL = `要花一阵子的事（查资料、写东西、跑命令），先随口应一声，然后在同一轮里接着做完，把结果发出来。结果以实际做成的为准，没做成就直说。查到的东西用自己的话讲，别人要出处时再给链接。
 
 有人在等你回话时，这一轮结束前要么回他，要么调用 finish_channel_turn 写下为什么不回。发完消息还可以继续用工具、继续发。几件互不相关的事（发几条消息、查几样东西）可以在同一次回复里一起调用工具，要用到前一个结果的再分开调用。
@@ -1413,9 +1417,10 @@ const ROOT_CHANNEL_MESSAGE_POLICY_TAIL = `要花一阵子的事（查资料、�
 有人问起你是怎么运作的，用平常话回答就行，不用讲工具名、系统提示和内部流程。密钥、别人的私事，还有你所在这台机器的情况（文件路径、配置、软件版本、运行状态），不要说到群里，除非管理员自己问起。`
 
 /** The waiting paragraph only appears where the channel lets the agent wait; otherwise it invites a refused call. */
-const rootChannelMessagePolicy = (waitAvailable: boolean): string =>
+const rootChannelMessagePolicy = (waitAvailable: boolean, optionalReplies = false): string =>
   [
     ROOT_CHANNEL_MESSAGE_POLICY_HEAD,
+    ...(optionalReplies ? [ROOT_CHANNEL_OPTIONAL_REPLY_POLICY] : []),
     ...(waitAvailable ? [ROOT_CHANNEL_WAIT_POLICY] : []),
     ROOT_CHANNEL_MESSAGE_POLICY_TAIL,
   ].join('\n\n')
@@ -4651,12 +4656,13 @@ export class DshHostRuntime implements AgentSessionDriver {
       const requestWait = this.#communication.waitForMore
       const waitAvailable =
         requestWait !== undefined && this.#communication.supportsWaitForMore?.(input.channelId) !== false
+      const optionalReplies = this.#communication.optionalReplies?.(input.channelId) === true
       agentContext.systemPrompt.section({
         name: 'nekro-nxt:channel-communication',
         order: 20,
         text: (context) =>
           scopeHasTool(agentContext.tools, 'send_channel_message', context.scope)
-            ? rootChannelMessagePolicy(waitAvailable)
+            ? rootChannelMessagePolicy(waitAvailable, optionalReplies)
             : CHILD_CHANNEL_MESSAGE_POLICY,
       })
       agentContext.systemPrompt.section({

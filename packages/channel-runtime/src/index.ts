@@ -613,14 +613,15 @@ const waitSupported = (binding: BindingRecord): boolean =>
 type MidSignal =
   { readonly kind: 'attention' } | { readonly kind: 'name'; readonly name: string } | { readonly kind: 'ambient' }
 
-const midWakeNote = (signal: MidSignal): string => {
+const midWakeNote = (signal: MidSignal): string | undefined => {
   switch (signal.kind) {
     case 'name':
       return `有人提到了「${signal.name}」，所以叫醒了你。这不一定是在跟你说话；不想接话就用 finish_channel_turn 结束，不回也可以。`
     case 'attention':
       return '刚才跟你聊天的人接着说了话，所以叫醒了你。这不一定是对你说的；不想接话就用 finish_channel_turn 结束，不回也可以。'
     case 'ambient':
-      return '群里有新消息，所有消息你都能看到。接不接话由你决定：有人在跟你说话、话题和你有关，或者你有想说的，就像群友一样自然地接一句；只是别人之间在聊、你插不上话，就用 finish_channel_turn 结束，不回也可以。'
+      // Said once in the system prompt instead (`optionalRepliesEnabled`); a note on every message outweighs the chat.
+      return undefined
   }
 }
 
@@ -909,7 +910,8 @@ export class ChannelRuntime {
     ) {
       this.#timing.noteAttention(lane, event.senderMemberId)
     }
-    await this.#admit(current, event, undefined, mid === undefined ? {} : { note: midWakeNote(mid) })
+    const note = mid === undefined ? undefined : midWakeNote(mid)
+    await this.#admit(current, event, undefined, note === undefined ? {} : { note })
   }
 
   /**
@@ -958,6 +960,16 @@ export class ChannelRuntime {
   waitForMoreAvailable(channelId: ChannelId): boolean {
     const binding = this.#coreRepository.getBinding(channelId)
     return binding !== undefined && waitSupported(binding) && resolveResponseTiming(binding.responseTiming).waitEnabled
+  }
+
+  /** Whether every plain message wakes the agent without needing a reply, as of now; sessions read it when they open. */
+  optionalRepliesEnabled(channelId: ChannelId): boolean {
+    const binding = this.#coreRepository.getBinding(channelId)
+    return (
+      binding !== undefined &&
+      binding.triggerPolicy === 'always' &&
+      resolveResponseTiming(binding.responseTiming).optionalReplies
+    )
   }
 
   /**

@@ -3801,8 +3801,9 @@ describe('ChannelRuntime response timing (Decision 2026-10-31)', () => {
     for (const text of ['一', '二', '三']) await h.say(h.bob, text)
     expect(h.admissionCalls).toHaveLength(3)
     for (const call of h.admissionCalls) expect(call).toMatchObject({ replyRequired: false })
-    expect(h.admissionCalls[0]!.wakeNote).toContain('finish_channel_turn')
-    expect(h.admissionCalls[0]!.wakeNote).not.toContain('%')
+    // Said once in the system prompt, not appended to every message.
+    for (const call of h.admissionCalls) expect(call.wakeNote).toBeUndefined()
+    expect(h.runtime.optionalRepliesEnabled(h.channel.id)).toBe(true)
     // The processing reaction promises a reply, so optional wakes show none.
     expect(feedback).not.toHaveBeenCalled()
     // Addressing the agent still obliges a reply, and shows the reaction.

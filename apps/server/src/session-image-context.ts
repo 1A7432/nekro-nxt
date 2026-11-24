@@ -16,7 +16,11 @@ import AttachmentStore, {
   type StoredImageAttachment,
 } from '@deepseek-ai/dsh-attachment'
 import { readRequestImageFile } from '@deepseek-ai/dsh-attachment-local'
-import { BasicCompactionEngine, type ResolvedConfig } from '@deepseek-ai/dsh-compaction-basic'
+import {
+  BasicCompactionEngine,
+  type ModelCompactPolicyConfig,
+  type ResolvedConfig,
+} from '@deepseek-ai/dsh-compaction-basic'
 import {
   BlockAssembler,
   contentHasImage,
@@ -68,9 +72,11 @@ import { projectTokenUsage } from './token-usage.js'
 import {
   incomingImages,
   observedRequestImages,
+  REQUEST_COMPACTION_IMAGE_BYTES,
   requestImageTransport,
   restoredImageCap,
   trimRequestImages,
+  visibleImageBytes,
   type RequestImageLimits,
   type RequestImageTransport,
 } from './request-image-limit.js'
@@ -583,13 +589,28 @@ const SettingsObjectSchema = z.record(z.string(), z.unknown())
 export class NekroNxtCompactionEngine extends BasicCompactionEngine {
   constructor(...args: ConstructorParameters<typeof BasicCompactionEngine>) {
     super(...args)
-    this.ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
+    // Ahead of DSH's own step compaction, so `compactIfNeeded` knows whether a turn is just starting.
+    this.ctx.on(
+      'agent/pre-step',
+      ({ agent, step }, next) => {
+        this.stepOf.set(agent.session, step)
+        return next()
+      },
+      { prepend: true },
+    )
+    this.ctx.on('agent/pre-step', async ({ agent, signal, step }, next) => {
       const decision = await next()
-      if (decision.kind === 'enter' && !signal.aborted) this.limitRequestImages(agent, decision.messages)
+      // Only between turns: inside one, a request must stay an unchanged prefix of the next. Rewriting it there
+      // loses the provider's cache, and relays that continue a live turn (Meridian) reject the changed history.
+      if (decision.kind === 'enter' && !signal.aborted && step === 1) this.limitRequestImages(agent, decision.messages)
       return decision
     })
   }
 
+  /** The step each conversation is preparing, as of its latest `agent/pre-step`; 1 opens a turn. */
+  private readonly stepOf = new WeakMap<object, number>()
+  /** Conversations compacted by request size in the step being prepared, until that step limits its images. */
+  private readonly compactedForSize = new WeakSet<object>()
   private visualRestoreDepth = 0
   private modelChoice: ((agent: Agent) => InSessionCompactionModel | undefined) | undefined
   private thresholdChoice: ((agent: Agent, contextWindow: number) => number | undefined) | undefined
@@ -649,6 +670,10 @@ export class NekroNxtCompactionEngine extends BasicCompactionEngine {
     const session = agent.session
     // Read at every step, so a changed setting or override applies without restarting the conversation.
     const thresholdRatio = this.thresholdFor(agent, contextWindow)
+    if (this.stepOf.get(session) === 1) {
+      const bySize = await this.compactForRequestSize(agent, target, contextWindow, trigger, signal)
+      if (bySize !== undefined) return bySize
+    }
     return relievePressure({
       session,
       budget: this.budgetFor(target.provider, target.model, contextWindow, thresholdRatio),
@@ -660,6 +685,93 @@ export class NekroNxtCompactionEngine extends BasicCompactionEngine {
           : this.withThreshold(thresholdRatio, target, () => super.compactIfNeeded(agent, trigger, signal)),
       log: (message) => this.ctx.logger.info(message),
     })
+  }
+
+  /**
+   * Compaction by request size, checked as a turn opens on routes that resend every image. Past
+   * `REQUEST_COMPACTION_IMAGE_BYTES` the conversation is summarized now, with almost nothing retained, so the images
+   * go with it (restoring puts a few recent ones back) and requests stay under what relays accept. Doing it only here
+   * leaves every request inside a turn an unchanged prefix of the next. When the summary cannot bring the images
+   * down, the oldest ones are omitted instead, also before the turn's first request. Undefined when no action was due.
+   */
+  private async compactForRequestSize(
+    agent: Agent,
+    target: { readonly provider: string; readonly model: string },
+    contextWindow: number,
+    trigger: Parameters<BasicCompactionEngine['compactIfNeeded']>[1],
+    signal: AbortSignal,
+  ): Promise<Awaited<ReturnType<BasicCompactionEngine['compactIfNeeded']>> | undefined> {
+    const session = agent.session
+    if (this.requestImageLimitsFor(agent).maxBytes === undefined) return undefined
+    const bytes = visibleImageBytes(session)
+    if (bytes <= REQUEST_COMPACTION_IMAGE_BYTES) return undefined
+    const log = (message: string) => this.ctx.logger.info(message)
+    const total = this.ctx.tokenMeter.measure(session).totalTokens
+    const budget = this.budgetFor(target.provider, target.model, contextWindow)
+    // Exactly one summary: the threshold sits just under the current size, so the first compaction already gets below
+    // it (what is measured here is tokens, the images are what has to go), and no retry pays for a second one.
+    const thresholdTokens = Math.max(2, Math.floor(total * 0.9))
+    const retainTokens = Math.max(0, Math.min(budget.retainTokens, Math.floor(total * 0.1), thresholdTokens - 1))
+    log(`图片约 ${(bytes / 1024 / 1024).toFixed(1)} MiB，接近单次请求的体积上限，在这一轮开始前压缩`)
+    try {
+      const result = await this.withCompactionPolicy(
+        target,
+        { thresholdRatio: thresholdTokens / contextWindow, retainTokens, compactionRetries: 0 },
+        () => super.compactIfNeeded(agent, trigger, signal),
+      )
+      this.stall.clear(session)
+      if (result !== null) {
+        // Restoring runs after this returns and may put large recent images back; the step's image limiting, which
+        // follows it, then holds them under this threshold too, so the next turn does not compact again.
+        this.compactedForSize.add(session)
+        return result
+      }
+    } catch (error) {
+      signal.throwIfAborted()
+      this.ctx.logger.warn(`按体积压缩失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+    trimRequestImages({ session, limits: { maxBytes: REQUEST_COMPACTION_IMAGE_BYTES }, log })
+    return null
+  }
+
+  /**
+   * Runs `start` with this target's threshold and retained tail replaced, the way `withThreshold` replaces the
+   * threshold alone: DSH resolves the routed policy synchronously before its first await.
+   */
+  private withCompactionPolicy<T>(
+    target: { readonly provider: string; readonly model: string },
+    policy: { readonly thresholdRatio: number; readonly retainTokens: number; readonly compactionRetries: number },
+    start: () => T,
+  ): T {
+    const base = this.config
+    const matches = (candidate: { readonly provider: string; readonly model: string }) =>
+      candidate.provider === target.provider && candidate.model === target.model
+    // The two retention forms are exclusive in DSH's policy; the replaced one carries only `retainTokens`.
+    const override = (candidate: Readonly<ModelCompactPolicyConfig>): ModelCompactPolicyConfig => {
+      const replacedPolicy: ModelCompactPolicyConfig = { ...candidate, ...policy }
+      delete replacedPolicy.retainRatio
+      return replacedPolicy
+    }
+    const replaced: ResolvedConfig = {
+      thresholdRatio: policy.thresholdRatio,
+      headroomTokens: base.headroomTokens,
+      summarizationProvider: base.summarizationProvider,
+      summarizationModel: base.summarizationModel,
+      maxTokens: base.maxTokens,
+      compactionRetries: policy.compactionRetries,
+      maxOverflowRetries: base.maxOverflowRetries,
+      retainTokens: policy.retainTokens,
+      auto: base.auto,
+      modelPolicies: base.modelPolicies.some(matches)
+        ? base.modelPolicies.map((candidate) => (matches(candidate) ? override(candidate) : candidate))
+        : [...base.modelPolicies, { provider: target.provider, model: target.model, ...policy }],
+    }
+    Object.assign(this, { config: replaced })
+    try {
+      return start()
+    } finally {
+      Object.assign(this, { config: base })
+    }
   }
 
   /**
@@ -718,10 +830,15 @@ export class NekroNxtCompactionEngine extends BasicCompactionEngine {
    * conversation is rewritten once, and counts the images of the messages the step is about to add.
    */
   private limitRequestImages(agent: Agent, adding: readonly UserMessage[]): void {
+    const limits = this.requestImageLimitsFor(agent)
+    const compactedForSize = this.compactedForSize.delete(agent.session)
     try {
       trimRequestImages({
         session: agent.session,
-        limits: this.requestImageLimitsFor(agent),
+        limits:
+          compactedForSize && limits.maxBytes !== undefined
+            ? { ...limits, maxBytes: Math.min(limits.maxBytes, REQUEST_COMPACTION_IMAGE_BYTES) }
+            : limits,
         incoming: incomingImages(adding),
         log: (message) => this.ctx.logger.info(message),
       })

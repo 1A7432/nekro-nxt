@@ -103,9 +103,11 @@ describe('request image limit', () => {
         trimRequestImages({ session: c.session, limits: { maxBytes: REQUEST_IMAGE_BYTE_LIMIT }, log: silent }),
       )
     }
-    // Nine 1 MiB pictures pass 8 MiB; trimming leaves 6 MiB, so the next trim is three pictures away.
-    expect(rounds).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 3])
-    expect(c.offloaded().filter((flag) => !flag)).toHaveLength(6)
+    // The guard is about 7 MiB of base64 body, 5.25 MiB of pictures: six 1 MiB pictures pass it, trimming leaves
+    // 3 MiB (1.5 MiB of pictures under the guard), so the next trim is three pictures away.
+    expect(REQUEST_IMAGE_BYTE_LIMIT).toBe(Math.floor((7 * MIB * 3) / 4))
+    expect(rounds).toEqual([0, 0, 0, 0, 0, 3, 0, 0, 3, 0, 0, 3])
+    expect(c.offloaded().filter((flag) => !flag)).toHaveLength(3)
   })
 
   it('counts the images a step is about to add, though only logged ones can be omitted', () => {

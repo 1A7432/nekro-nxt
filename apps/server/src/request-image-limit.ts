@@ -13,14 +13,29 @@ import type {} from './request-timing.js'
 /** How many images one trimming step omits for a limit of `maxImages`. */
 export const requestImageStep = (maxImages: number): number => Math.max(2, Math.ceil(maxImages / 4))
 
+const MIB = 1024 * 1024
+
 /**
- * Byte guard for routes that send every image in full with each request. 8 MiB of pictures is already several
- * seconds of upload per step, and stays well below the 20 MiB inline cap DSH enforces itself; DSH trims at that cap
- * one image at a time, which would rewrite the conversation on every step from then on. Trimming to 2 MiB under the
- * guard leaves room for a few more pictures before the next rewrite.
+ * Images travel base64-encoded, so a request body carries 4/3 of their bytes. Relays in front of a subscription
+ * (Meridian accepts at most 8 MiB per request) and slow uplinks feel the encoded size, so the guards below are set
+ * against an 8 MiB body and converted to the image bytes `estimatedRequestImageBytes` counts.
  */
-export const REQUEST_IMAGE_BYTE_LIMIT = 8 * 1024 * 1024
-export const REQUEST_IMAGE_BYTE_STEP = 2 * 1024 * 1024
+const imageBytesForBody = (bodyBytes: number): number => Math.floor((bodyBytes * 3) / 4)
+
+/**
+ * Past this the conversation is compacted before the next turn starts: a summary drops the images, and doing it
+ * only between turns keeps every request inside a turn an unchanged prefix of the next one. About 6 MiB of body.
+ */
+export const REQUEST_COMPACTION_IMAGE_BYTES = imageBytesForBody(6 * MIB)
+
+/**
+ * Last-resort guard for routes that send every image in full with each request, for when compaction cannot shrink
+ * the images (they sit in the retained tail). About 7 MiB of body, under the 8 MiB relays accept and well below the
+ * 20 MiB inline cap DSH enforces itself; DSH trims at that cap one image at a time, which would rewrite the
+ * conversation on every step from then on. Trimming 1.5 MiB under the guard leaves room before the next rewrite.
+ */
+export const REQUEST_IMAGE_BYTE_LIMIT = imageBytesForBody(7 * MIB)
+export const REQUEST_IMAGE_BYTE_STEP = imageBytesForBody(2 * MIB)
 
 /** What one conversation's requests are held to; both absent means images are left alone. */
 export interface RequestImageLimits {
@@ -80,6 +95,10 @@ const visibleImages = (session: Pick<OffloadableSession, 'eventAt' | 'deriveEven
   }
   return images
 }
+
+/** Roughly how many image bytes the next request resends, counting only images the model still receives. */
+export const visibleImageBytes = (session: Pick<OffloadableSession, 'eventAt' | 'deriveEventMessage' | 'surface'>) =>
+  visibleImages(session).reduce((sum, image) => sum + image.bytes, 0)
 
 /** Image references in the messages about to join the conversation, in order; they are not logged yet. */
 export const incomingImages = (messages: readonly { readonly content: readonly ContentBlock[] }[]) =>

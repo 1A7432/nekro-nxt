@@ -354,6 +354,10 @@ export const memberSummary = (
   }
 }
 
+/** A mention as the agent reads it: 「@你」 for its own account, otherwise the member's label. */
+export const mentionLabel = (member: MemberSummary): string =>
+  member.relation?.kind === 'self' ? '@你' : `@${memberLabel(member)}`
+
 /** How a member is named to the agent: the stable member id always, and what the host knows about who it is. */
 export const memberLabel = (member: MemberSummary): string => {
   const relation = member.relation
@@ -393,7 +397,7 @@ export const historyPartsText = (
         case 'text':
           return part.text
         case 'mention':
-          return `@${memberLabel(memberSummary(history, part.memberId, relations))}`
+          return mentionLabel(memberSummary(history, part.memberId, relations))
         case 'image':
           return `[${part.sticker ? '表情包' : '图片'} ${shortId(part.assetId)}${part.alt ? `：${part.alt}` : ''}]`
         case 'file':
@@ -1422,7 +1426,7 @@ export class SessionImageContext {
         case 'mention': {
           blocks.push({
             type: 'text',
-            text: `@${memberLabel(memberSummary(this.#history, part.memberId, this.#members))}`,
+            text: mentionLabel(memberSummary(this.#history, part.memberId, this.#members)),
           })
           break
         }

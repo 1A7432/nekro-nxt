@@ -1,11 +1,12 @@
 import { AssetService, CoreService } from '@nekro-nxt/core'
-import { ChannelIdSchema } from '@nekro-nxt/contracts'
+import { ChannelIdSchema, ChannelMemberIdSchema } from '@nekro-nxt/contracts'
 import { openMigratedCoreDatabase, SqliteCoreRepository } from '@nekro-nxt/storage-sqlite'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
 import { afterEach, describe, expect, it } from 'vitest'
+import { mentionLabel } from '../src/session-image-context.js'
 import { resolveShortId, resolveShortIdArgs, shortId, ShortIdError, type ShortIdLookup } from '../src/short-ids.js'
 
 const CHANNEL = ChannelIdSchema.parse('chn_FIXTURE')
@@ -77,6 +78,15 @@ describe('short ids', () => {
       about: 'mbr_01M7TKK3AYDY18MV5E1NTA8Y8G',
       images: [{ assetId: 'ast_X1M85W28TJXZ9P3A63ZX71SJ2T', focus: '&71SJ2T 的左上角' }],
     })
+  })
+})
+
+describe('mentions', () => {
+  it('reads a mention of the agent itself as 「@你」 and others by name and short id', () => {
+    const self = ChannelMemberIdSchema.parse('mbr_01M7TJYZX5KKBM7YW4D6VJY5KQ')
+    const other = ChannelMemberIdSchema.parse('mbr_01M7TKK3AYDY18MV5E1NTA8Y8G')
+    expect(mentionLabel({ memberId: self, displayName: '机器人账号', relation: { kind: 'self' } })).toBe('@你')
+    expect(mentionLabel({ memberId: other, displayName: '成员乙' })).toBe('@成员乙（@TA8Y8G）')
   })
 })
 

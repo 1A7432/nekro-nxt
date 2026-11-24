@@ -4,6 +4,7 @@ import { openMigratedCoreDatabase, SqliteCoreRepository } from '@nekro-nxt/stora
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { shortId } from '../src/short-ids.js'
 import { afterEach, describe, expect, it } from 'vitest'
 import { channelMemberRelations } from '../src/channel-member-relations.ts'
 import { channelContextPrompt } from '../src/index.ts'
@@ -85,8 +86,8 @@ describe('channel member relations', () => {
         },
         relations,
       )
-      expect(prompt).toContain(`你在这个群里的账号是「小助手号」，成员 ID ${self.memberId}`)
-      expect(prompt).toContain(`群里还有别的智能体：记录员（${recorder!.memberId}）`)
+      expect(prompt).toContain(`你在这个群里的账号是「小助手号」，成员编号 ${shortId(self.memberId)}`)
+      expect(prompt).toContain(`群里还有别的智能体：记录员（${shortId(recorder!.memberId)}）`)
       // Formatting follows the platform: plain text unless the adapter renders Markdown (#125).
       expect(prompt).toContain('这个频道不显示 Markdown')
       const markdownPrompt = channelContextPrompt(

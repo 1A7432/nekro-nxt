@@ -1,3 +1,4 @@
+import { shortId } from '../src/short-ids.js'
 import { unusedNxtBackends } from './fixtures/unused-nxt-backends.js'
 import { extensionVerification } from './fixtures/extension-verification.js'
 import { SessionId } from '@deepseek-ai/dsh-session'
@@ -2371,21 +2372,21 @@ describe('DSH Host and internal Channel vertical slice', () => {
       expect(eventText).toContain('当前频道：')
       expect(eventText).toContain(channel.id)
       const contextTime = String.raw`\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{2}:\d{2}`
-      expect(eventText).toMatch(new RegExp(`\\[${contextTime} · ${browserEvent.logicalMessageId}\\]`))
+      expect(eventText).toMatch(new RegExp(`\\[${contextTime} · ${shortId(browserEvent.logicalMessageId)}\\]`))
       expect(eventText).not.toContain(`频道事件 ${browserEvent.id}`)
-      expect(eventText).toMatch(new RegExp(`\\[引用 ${quotedEvent.logicalMessageId}（${contextTime}，成员甲`))
+      expect(eventText).toMatch(new RegExp(`\\[引用 ${shortId(quotedEvent.logicalMessageId)}（${contextTime}，成员甲`))
       expect(eventText).toContain('这是被引用的当前频道内容。')
       expect(eventText).toContain('@成员乙')
-      expect(eventText).toContain(`[图片 ${quotedImage.asset.id}：引用图片]`)
+      expect(eventText).toContain(`[图片 ${shortId(quotedImage.asset.id)}：引用图片]`)
       expect(eventText).toContain('你看不到图片本身')
-      expect(eventText).toContain(`[文件 ${quotedFileId}：引用资料.txt]`)
+      expect(eventText).toContain(`[文件 ${shortId(quotedFileId)}：引用资料.txt]`)
       expect(eventText).toContain('可以用 asset_read_text 读')
-      expect(eventText).toContain(`[语音 ${quotedAudioId}]`)
+      expect(eventText).toContain(`[语音 ${shortId(quotedAudioId)}]`)
       expect(eventText).toContain('引用卡片摘要')
       expect(eventText).toContain(`[引用 ${staleEvent.logicalMessageId}`)
       expect(eventText).not.toContain('同频道但未准入旧 Episode 的内容')
       expect(eventText).toContain(`[引用 ${otherChannelEvent.logicalMessageId}，原消息找不到了]`)
-      expect(eventText).toContain('[引用 msg_MISSINGQUOTE，原消息找不到了]')
+      expect(eventText).toContain('[引用 #GQUOTE，原消息找不到了]')
       expect(eventText).not.toContain('另一个频道的秘密内容')
 
       core.reviseAgent(agent.definition.id, agent.revision.id, {
@@ -2423,7 +2424,7 @@ describe('DSH Host and internal Channel vertical slice', () => {
       const resumedEvents = JSON.stringify(host.sessionEvents(resumedEpisode.dshSessionId!))
       expect(resumedEvents).toContain('nekro-nxt-handoff')
       expect(resumedEvents).toContain('你好，请回复我。')
-      expect(resumedEvents).toContain(`[原文 ${browserEvent.logicalMessageId}]`)
+      expect(resumedEvents).toContain(`[原文 ${shortId(browserEvent.logicalMessageId)}]`)
       expect(resumedEvents).toMatch(
         new RegExp(`\\[引用 ${outboundHistory[0]!.logicalMessageId}（${contextTime}，你发的`),
       )

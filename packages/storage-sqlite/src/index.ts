@@ -7,9 +7,16 @@ import type { AgentRevisionId, ChannelId, JsonValue } from '@nekro-nxt/contracts
 import type { AssetAccessRepository } from '@nekro-nxt/core'
 import type { ChannelHistoryRepository, RuntimeRepository } from '@nekro-nxt/channel-runtime'
 import type { AuthoringRepository, ExtensionRepository, HostUiRepository } from '@nekro-nxt/extension-runtime'
-import { eq } from 'drizzle-orm'
+import { and, eq, like } from 'drizzle-orm'
 import type { CoreDatabase } from './database.js'
-import { systemSettings, workTreeOrder } from './schema.js'
+import {
+  assetChannelGrants,
+  channelEvents,
+  channelMembers,
+  outboundIntents,
+  systemSettings,
+  workTreeOrder,
+} from './schema.js'
 import { createAgentsRepository } from './repositories/agents.js'
 import { createChannelsRepository } from './repositories/channels.js'
 import { createOutboxRepository } from './repositories/outbox.js'
@@ -236,6 +243,60 @@ export class SqliteCoreRepository implements CurrentRepository {
     this.credentials = createCredentialsRepository(database.db)
     this.linkedAccounts = createLinkedAccountsRepository(database.db)
     this.extensionConfigVersions = createExtensionConfigVersionsRepository(database.db)
+  }
+  /**
+   * Ids in one channel that end with `suffix`, at most `limit`: the messages, members or assets an agent names by the
+   * short form it was shown. More than one result means the suffix is ambiguous there.
+   */
+  findChannelIdsBySuffix(
+    channelId: ChannelId,
+    kind: 'message' | 'member' | 'asset',
+    suffix: string,
+    limit = 2,
+  ): string[] {
+    if (!/^[0-9A-Za-z]{1,32}$/u.test(suffix)) return []
+    const pattern = `%${suffix}`
+    const ids = new Set<string>()
+    const add = (rows: readonly { readonly id: string }[]) => {
+      for (const row of rows) ids.add(row.id)
+    }
+    if (kind === 'member') {
+      add(
+        this.#db
+          .select({ id: channelMembers.id })
+          .from(channelMembers)
+          .where(and(eq(channelMembers.channelId, channelId), like(channelMembers.id, pattern)))
+          .limit(limit)
+          .all(),
+      )
+    } else if (kind === 'asset') {
+      add(
+        this.#db
+          .selectDistinct({ id: assetChannelGrants.assetId })
+          .from(assetChannelGrants)
+          .where(and(eq(assetChannelGrants.channelId, channelId), like(assetChannelGrants.assetId, pattern)))
+          .limit(limit)
+          .all(),
+      )
+    } else {
+      add(
+        this.#db
+          .selectDistinct({ id: channelEvents.logicalMessageId })
+          .from(channelEvents)
+          .where(and(eq(channelEvents.channelId, channelId), like(channelEvents.logicalMessageId, pattern)))
+          .limit(limit)
+          .all(),
+      )
+      add(
+        this.#db
+          .selectDistinct({ id: outboundIntents.logicalMessageId })
+          .from(outboundIntents)
+          .where(and(eq(outboundIntents.channelId, channelId), like(outboundIntents.logicalMessageId, pattern)))
+          .limit(limit)
+          .all(),
+      )
+    }
+    return [...ids].slice(0, limit)
   }
 
   getWorkTreeOrder(): WorkTreeOrderRecord {

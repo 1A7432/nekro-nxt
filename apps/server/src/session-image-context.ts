@@ -69,6 +69,7 @@ import {
   type CompactionBudget,
 } from './compaction-pressure.js'
 import { projectTokenUsage } from './token-usage.js'
+import { shortId } from './short-ids.js'
 import {
   incomingImages,
   observedRequestImages,
@@ -356,14 +357,14 @@ export const memberSummary = (
 /** How a member is named to the agent: the stable member id always, and what the host knows about who it is. */
 export const memberLabel = (member: MemberSummary): string => {
   const relation = member.relation
-  if (relation?.kind === 'self') return `你（${member.memberId}）`
+  if (relation?.kind === 'self') return `你（${shortId(member.memberId)}）`
   const name = member.displayName ?? '未知成员'
   if (relation?.kind === 'local-agent') {
     const owner = relation.agentName === undefined ? '本机另一个账号' : `智能体「${relation.agentName}」的账号`
-    return `${name}（${owner}，${member.memberId}）`
+    return `${name}（${owner}，${shortId(member.memberId)}）`
   }
-  if (relation?.kind === 'administrator') return `${name}（NekroNXT 管理员，${member.memberId}）`
-  return `${name}（${member.memberId}）`
+  if (relation?.kind === 'administrator') return `${name}（管理员，${shortId(member.memberId)}）`
+  return `${name}（${shortId(member.memberId)}）`
 }
 
 export const historyEntrySenderDescription = (
@@ -394,13 +395,13 @@ export const historyPartsText = (
         case 'mention':
           return `@${memberLabel(memberSummary(history, part.memberId, relations))}`
         case 'image':
-          return `[${part.sticker ? '表情包' : '图片'} ${part.assetId}${part.alt ? `：${part.alt}` : ''}]`
+          return `[${part.sticker ? '表情包' : '图片'} ${shortId(part.assetId)}${part.alt ? `：${part.alt}` : ''}]`
         case 'file':
-          return `[文件 ${part.assetId}${part.name ? `：${part.name}` : ''}]`
+          return `[文件 ${shortId(part.assetId)}${part.name ? `：${part.name}` : ''}]`
         case 'audio':
-          return `[语音 ${part.assetId}]`
+          return `[语音 ${shortId(part.assetId)}]`
         case 'quote':
-          return `[引用 ${part.messageId}]`
+          return `[引用 ${shortId(part.messageId)}]`
         case 'rich':
           return `[${part.kind === 'forward' ? '转发' : part.kind === 'quote-preview' ? '引用预览' : '卡片'}] ${richPartContextText(part)}`
       }
@@ -427,7 +428,7 @@ export const historyEntryLine = (
     text.length > HISTORY_LINE_MAX_CHARS
       ? `${text.slice(0, HISTORY_LINE_MAX_CHARS)}……（后面还有 ${text.length - HISTORY_LINE_MAX_CHARS} 字）`
       : text
-  return `[${formatContextTime(entry.occurredAt, previousAt)} · ${entry.logicalMessageId}]${sender}：${body}`
+  return `[${formatContextTime(entry.occurredAt, previousAt)} · ${shortId(entry.logicalMessageId)}]${sender}：${body}`
 }
 
 /** Header for a due scheduled job; it is a Host fact, not a member message, and does not oblige a reply. */
@@ -1278,7 +1279,7 @@ export class SessionImageContext {
         for (const asset of assetsToRestore) {
           blocks.push({
             type: 'text',
-            text: `恢复图片 ${asset.assetId}；来源消息：${asset.sourceMessageIds.join('、')}。`,
+            text: `恢复图片 ${shortId(asset.assetId)}；来源消息：${asset.sourceMessageIds.map(shortId).join('、')}。`,
           })
           blocks.push({ type: 'image', attachment: asset.attachment })
         }
@@ -1393,7 +1394,7 @@ export class SessionImageContext {
           if (imageStats) imageStats.duplicateCount += 1
           blocks.push({
             type: 'text',
-            text: `[图片 ${assetId}，和前面的一张相同]`,
+            text: `[图片 ${shortId(assetId)}，和前面的一张相同]`,
           })
           return
         }
@@ -1410,7 +1411,7 @@ export class SessionImageContext {
       }
       blocks.push({
         type: 'text',
-        text: `[图片 ${asset.id}]（你看不到图片本身，需要时用 asset_inspect_images）`,
+        text: `[图片 ${shortId(asset.id)}]（你看不到图片本身，需要时用 asset_inspect_images）`,
       })
     }
     for (const part of parts) {
@@ -1428,35 +1429,35 @@ export class SessionImageContext {
         case 'image':
           blocks.push({
             type: 'text',
-            text: `[${part.sticker ? '表情包' : '图片'} ${part.assetId}${part.alt ? `：${part.alt}` : ''}]`,
+            text: `[${part.sticker ? '表情包' : '图片'} ${shortId(part.assetId)}${part.alt ? `：${part.alt}` : ''}]`,
           })
           await attachImage(part.assetId, part.alt)
           break
         case 'file':
           blocks.push({
             type: 'text',
-            text: `[文件 ${part.assetId}${part.name ? `：${part.name}` : ''}]（小的文本文件可以用 asset_read_text 读）`,
+            text: `[文件 ${shortId(part.assetId)}${part.name ? `：${part.name}` : ''}]（小的文本文件可以用 asset_read_text 读）`,
           })
           break
         case 'audio':
-          blocks.push({ type: 'text', text: `[语音 ${part.assetId}]` })
+          blocks.push({ type: 'text', text: `[语音 ${shortId(part.assetId)}]` })
           break
         case 'quote': {
           if (!expandQuotes) {
-            blocks.push({ type: 'text', text: `[引用 ${part.messageId}]` })
+            blocks.push({ type: 'text', text: `[引用 ${shortId(part.messageId)}]` })
             break
           }
           const quoted = this.#history.getChannelHistoryEntryByLogicalMessageId(channelId, part.messageId)
           if (quoted === undefined) {
             blocks.push({
               type: 'text',
-              text: `[引用 ${part.messageId}，原消息找不到了]`,
+              text: `[引用 ${shortId(part.messageId)}，原消息找不到了]`,
             })
             break
           }
           blocks.push({
             type: 'text',
-            text: `[引用 ${part.messageId}（${formatContextTime(quoted.occurredAt)}${historyEntrySenderDescription(this.#history, quoted, this.#members)}）：`,
+            text: `[引用 ${shortId(part.messageId)}（${formatContextTime(quoted.occurredAt)}${historyEntrySenderDescription(this.#history, quoted, this.#members)}）：`,
           })
           blocks.push(
             ...(await this.projectMessageParts(sessionId, channelId, quoted.parts, visibleDigests, imageStats, false)),
@@ -1508,7 +1509,7 @@ export class SessionImageContext {
     const blocks: ContentBlock[] = [
       {
         type: 'text',
-        text: job ?? `[${time} · ${event.logicalMessageId}]${senderDescription}${mentionDescription}：`,
+        text: job ?? `[${time} · ${shortId(event.logicalMessageId)}]${senderDescription}${mentionDescription}：`,
       },
     ]
     const seen =

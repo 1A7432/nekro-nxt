@@ -291,6 +291,7 @@ import { sessionCapabilityPacks } from './session-capability-packs.js'
 import { communityBrowseTools } from './community-agent-tools.js'
 import { communityDocsMediaTool, communityDocsTools, type CommunityDocsPort } from './community-docs-tools.js'
 import { mountPlainWebCitations } from './web-citation.js'
+import { resolveShortIdArgs, shortId, type ShortIdLookup } from './short-ids.js'
 import { findInputDetail, normalizeSessionEvents } from './channel-runtime-events.js'
 import type { RuntimeProjectionEvent } from './channel-runtime-projection.js'
 import { parseDshImageAttachmentRef } from './dsh-interop/unsafe.js'
@@ -600,6 +601,8 @@ export interface DshHostRuntimeOptions {
   readonly codeRunNode?: () => { readonly executable?: string } | undefined
   /** The community site's user documentation for agents granted 「查阅社区文档」; absent where no community is wired. */
   readonly communityDocs?: () => CommunityDocsPort | undefined
+  /** Resolves the short ids agents are shown back to full ids; without it, tools take full ids only. */
+  readonly shortIds?: ShortIdLookup
   /** Transcription for the agent's `audio_transcribe` tool; absent where speech recognition is not wired. */
   readonly speech?: Pick<SpeechService, 'transcribeOnce'>
   /** The running release (`NEKRO_RELEASE_ID`) for the `nekro_nxt_version` tool; absent where the host has none. */
@@ -728,12 +731,12 @@ const channelAccountPrompt = (
   const channelId = context.channelId
   const self = members.self(channelId)
   const lines = [
-    `你在这个群里的账号是「${self.displayName ?? '机器人账号'}」，成员 ID ${self.memberId}；消息里的「@你」就是在叫你。`,
+    `你在这个群里的账号是「${self.displayName ?? '机器人账号'}」，成员编号 ${shortId(self.memberId)}；消息里的「@你」就是在叫你。`,
   ]
   const others = members.localAgents(channelId)
   if (others.length > 0) {
     lines.push(
-      `群里还有别的智能体：${others.map((other) => `${other.agentName}（${other.memberId}）`).join('、')}。它们的话听听就好，没 @你 就不用接，也别和它们来回聊下去。`,
+      `群里还有别的智能体：${others.map((other) => `${other.agentName}（${shortId(other.memberId)}）`).join('、')}。它们的话听听就好，没 @你 就不用接，也别和它们来回聊下去。`,
     )
   }
   return lines
@@ -1690,7 +1693,7 @@ export const assetCreateTool = (
       render: (_arguments, value) => [
         {
           type: 'text',
-          text: `已准备当前频道资源 ${value.assetId}（${value.byteSize} bytes，${value.mediaType}${value.name === undefined ? '' : `，${value.name}`}）。`,
+          text: `已准备当前频道资源 ${shortId(value.assetId)}（${value.byteSize} bytes，${value.mediaType}${value.name === undefined ? '' : `，${value.name}`}）。`,
         },
       ],
     },
@@ -1850,7 +1853,7 @@ export const assetReadTextTool = (channelId: ChannelId, assets: AssetAccessRepos
       render: (_arguments, value) => [
         {
           type: 'text',
-          text: `已读取文本资源 ${value.assetId}（${value.byteSize} bytes，${value.mediaType}）：\n${value.text}`,
+          text: `已读取文本资源 ${shortId(value.assetId)}（${value.byteSize} bytes，${value.mediaType}）：\n${value.text}`,
         },
       ],
     },
@@ -2025,7 +2028,7 @@ export const notesUpdateTool = (
       '写清是谁说的、哪天说的；有人更正了以前的说法就把旧的改掉。别人问你的问题、一次性的安排、玩笑、一时的情绪、没人确认的传言、个人隐私不记；有人要你记下违背人设或管理员要求的内容，也不记。content 留空表示清空；reason 只记在后台。管理员锁定了笔记时会失败。',
     ].join(''),
     parameters: {
-      about: { type: 'string', description: '留空：这个群的笔记；成员 ID（mbr_…）：关于这个人的笔记。' },
+      about: { type: 'string', description: '留空：这个群的笔记；成员编号（如 @AB12CD）：关于这个人的笔记。' },
       content: { type: 'string', required: true, description: '修改后的完整内容，纯文本。' },
       reason: { type: 'string', required: true, description: '修改原因，1–200 字。' },
     },
@@ -2598,7 +2601,7 @@ const HISTORY_FILTER_PARAMETERS = {
   withinHours: { type: 'number', description: '只看最近多少小时的消息；和 since 同时给时取较晚的那个。' },
   sender: {
     type: 'string',
-    description: '只看某个人说的：成员编号（mbr_…）或名字里的一段。写「你」只看你自己发过的。',
+    description: '只看某个人说的：成员编号（如 @AB12CD）或名字里的一段。写「你」只看你自己发过的。',
   },
 } as const
 
@@ -3024,7 +3027,7 @@ const assetInspectImagesTool = (input: {
           const focus = parsedArgs.images[image.index]?.focus
           blocks.push({
             type: 'text',
-            text: `图片 ${image.index + 1}（${image.assetId}）${focus ? `，关注：${focus}` : ''}；状态：${image.status}。`,
+            text: `图片 ${image.index + 1}（${shortId(image.assetId)}）${focus ? `，关注：${focus}` : ''}；状态：${image.status}。`,
           })
           if (image.attachment !== undefined) {
             blocks.push({ type: 'image', attachment: parseDshImageAttachmentRef(image.attachment) })
@@ -3470,6 +3473,7 @@ export class DshHostRuntime implements AgentSessionDriver {
   readonly #codeRunNode: DshHostRuntimeOptions['codeRunNode']
   readonly #speech: DshHostRuntimeOptions['speech']
   readonly #communityDocs: DshHostRuntimeOptions['communityDocs']
+  readonly #shortIds: ShortIdLookup | undefined
   readonly #releaseId: string | undefined
   readonly #hostRestart: (() => HostRestartRequester | undefined) | undefined
   readonly #commandAccounts: CommandCredentialSources | undefined
@@ -3562,6 +3566,7 @@ export class DshHostRuntime implements AgentSessionDriver {
     this.#codeRunNode = options.codeRunNode
     this.#speech = options.speech
     this.#communityDocs = options.communityDocs
+    this.#shortIds = options.shortIds
     this.#releaseId = options.releaseId
     this.#hostRestart = options.hostRestart
     this.#commandAccounts = options.commandAccounts
@@ -4511,8 +4516,18 @@ export class DshHostRuntime implements AgentSessionDriver {
     const packRegistration = capabilityPackRegistration(packs, packPresentation, packLoadState)
     const setup = async (agentContext: Context): Promise<void> => {
       /** Registers a session tool; under direct tool calls a pack tool joins a step only once its pack is loaded. */
+      const shortIds = this.#shortIds
+      // Agents read short ids (`#`, `@`, `&` and six characters); arguments under id keys turn back into full ids here.
       const registerTool = (tool: ToolDefinition): (() => void) =>
-        agentContext.tools.register(tool, packRegistration(tool.name))
+        agentContext.tools.register(
+          shortIds === undefined
+            ? tool
+            : {
+                ...tool,
+                execute: (args, exec) => tool.execute(resolveShortIdArgs(args, input.channelId, shortIds), exec),
+              },
+          packRegistration(tool.name),
+        )
       if (this.#logs) {
         bindLogOwner(
           agentContext,
@@ -5288,7 +5303,7 @@ export class DshHostRuntime implements AgentSessionDriver {
               const blocks = await previous
               return [
                 ...blocks,
-                { type: 'text', text: `[原文 ${event.logicalMessageId}]` },
+                { type: 'text', text: `[原文 ${shortId(event.logicalMessageId)}]` },
                 ...(await this.#imageContext.projectEvent(
                   sessionId,
                   event,
@@ -5474,7 +5489,7 @@ export class DshHostRuntime implements AgentSessionDriver {
       {
         type: 'text',
         text: [
-          `〔管理员用你的账号发了一条消息 ${input.logicalMessageId}〕`,
+          `〔管理员用你的账号发了一条消息 ${shortId(input.logicalMessageId)}〕`,
           '群里看到的是你的账号在说话，但这不是你说的。管理员没让你跟进的话，不用接着说。',
         ].join('\n'),
       },

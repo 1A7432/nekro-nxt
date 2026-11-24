@@ -59,7 +59,7 @@ describe('send tool output after outbound processing', () => {
   it('names the extensions that changed a sent message, with the final content and appended messages', () => {
     expect(
       renderChannelMessageResult({
-        logicalMessageId: 'msg_fixture',
+        logicalMessageId: 'msg_01M861GPV7HJNAQPMZR8BJDJPW',
         status: 'sent',
         receipts: [],
         processing: {
@@ -67,16 +67,16 @@ describe('send tool output after outbound processing', () => {
           rewritten: true,
           parts: [{ type: 'text', text: 'hello' }],
           followUps: [
-            { extension: '配音', logicalMessageId: 'msg_follow', status: 'sent' },
+            { extension: '配音', logicalMessageId: 'msg_01M861GPV7HJNAQPMZR8FOLLOW', status: 'sent' },
             { extension: '表情包', status: 'not-sent', message: '前一条没有发出，追加的消息也没有发。' },
           ],
         },
       }),
     ).toBe(
       [
-        '消息 msg_fixture：sent，内容经「翻译」、「署名」处理。',
+        '消息 #BJDJPW：sent，内容经「翻译」、「署名」处理。',
         '实际发出的内容：[{"type":"text","text":"hello"}]',
-        '「配音」追加了一条，消息 msg_follow：sent',
+        '「配音」追加了一条，消息 #FOLLOW：sent',
         '「表情包」追加的一条没有发出：前一条没有发出，追加的消息也没有发。',
       ].join('\n'),
     )

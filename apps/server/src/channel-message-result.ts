@@ -1,3 +1,4 @@
+import { shortId } from './short-ids.js'
 import { AdapterDeliveryReceiptSchema, redactAdapterDiagnosticText } from '@nekro-nxt/adapter-sdk'
 import { MessageDeliverySummarySchema } from '@nekro-nxt/contracts'
 import { z } from 'zod'
@@ -23,7 +24,7 @@ const followUpLines = (processing: ChannelMessageProcessing): string[] =>
   processing.followUps.map((followUp) =>
     followUp.logicalMessageId === undefined
       ? `「${followUp.extension}」追加的一条没有发出${followUp.message === undefined ? '' : `：${followUp.message}`}`
-      : `「${followUp.extension}」追加了一条，消息 ${followUp.logicalMessageId}：${followUp.status}`,
+      : `「${followUp.extension}」追加了一条，消息 ${shortId(followUp.logicalMessageId)}：${followUp.status}`,
   )
 
 /** Preserve diagnostic results in the rendered content used by both native and PTC tool histories. */
@@ -39,12 +40,13 @@ export function renderChannelMessageResult(value: {
     return `这条消息没有发出：「${cancel.extension}」取消了它，原因：${cancel.reason}。可以按原因改一下再发。`
   }
   const processing = value.processing
+  const messageId = value.logicalMessageId === undefined ? undefined : shortId(value.logicalMessageId)
   if (value.status === 'sent') {
-    if (processing === undefined) return `消息 ${value.logicalMessageId}：sent`
+    if (processing === undefined) return `消息 ${messageId}：sent`
     return [
       processing.processedBy.length === 0
-        ? `消息 ${value.logicalMessageId}：sent`
-        : `消息 ${value.logicalMessageId}：sent，内容经${quoted(processing.processedBy)}处理。`,
+        ? `消息 ${messageId}：sent`
+        : `消息 ${messageId}：sent，内容经${quoted(processing.processedBy)}处理。`,
       ...(processing.parts === undefined ? [] : [`实际发出的内容：${JSON.stringify(processing.parts)}`]),
       ...followUpLines(processing),
     ].join('\n')

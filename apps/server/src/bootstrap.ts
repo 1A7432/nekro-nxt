@@ -1323,6 +1323,7 @@ export class NekroRuntime {
         },
         speech: speechService,
         communityDocs: () => docsPort.current,
+        shortIds: repository,
         ...(options.feedbackEnvironment === undefined ? {} : { releaseId: options.feedbackEnvironment.releaseId }),
         hostRestart: (): HostRestartRequester | undefined => {
           const current = restartPort.current
